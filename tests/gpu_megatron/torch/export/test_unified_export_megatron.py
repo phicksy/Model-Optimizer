@@ -821,7 +821,7 @@ def _test_export_pp2_mtp_metadata_matches_shards(tmp_path, model_dir, rank, size
     original_get_mtp_state_dict = GPTModelExporter._get_mtp_state_dict
 
     # Simulate stage-local MTP tensors (only on the last PP rank).
-    def _fake_get_mtp_state_dict(self):
+    def _fake_get_mtp_state_dict(self, copy_from_pretrained=True):
         if rank != size - 1:
             return {}
         return {f"mtp.injected.rank{rank}.weight": torch.ones(8, dtype=torch.bfloat16).cpu()}
@@ -1051,6 +1051,8 @@ def test_mtp_state_dict_copies_decoder_mtp_layers(tmp_path):
     exporter._src_num_hidden_layers = 2
     exporter._hf_text_config = SimpleNamespace(num_hidden_layers=1, num_nextn_predict_layers=1)
 
+    # Non-writer ranks skip the copy.
+    assert exporter._get_mtp_state_dict(copy_from_pretrained=False) == {}
     mtp_state_dict = exporter._get_mtp_state_dict()
 
     assert sorted(mtp_state_dict) == [

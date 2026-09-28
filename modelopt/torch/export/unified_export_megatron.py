@@ -333,6 +333,11 @@ class GPTModelExporter:
         # medusa_heads and eagle_module only exist in the last stage.
         is_last_stage_main_rank = pp_rank == pp_size - 1 and tp_rank == 0
         is_writer_rank = self._is_sidecar_writer_rank(is_last_stage_main_rank)
+        # One writer per pipeline stage: other TP / DP / EP ranks hold the same layers (EP>1 ranks
+        # hold no gathered experts at all), and writing them too would race on the same files.
+        writes_layers = (
+            tp_rank == 0 and get_data_parallel_rank() == 0 and get_expert_model_parallel_rank() == 0
+        )
 
         quantization_format = self._get_quantization_format(self.model)
         if self._any_rank_uses_iq_quantization():
@@ -415,8 +420,9 @@ class GPTModelExporter:
                 except (OSError, ValueError, ImportError):
                     pass
 
-            # MTP load mutates per-rank layer_state_dicts, so it runs on every last-stage main rank.
-            mtp_state_dict = self._get_mtp_state_dict()
+            # The live MTP export runs EP collectives, so every last-stage main rank joins it; the
+            # collective-free copy from the source checkpoint only runs on the writer.
+            mtp_state_dict = self._get_mtp_state_dict(copy_from_pretrained=writes_layers)
             if len(mtp_state_dict) > 0:
                 layer_state_dicts[self.model.config.num_layers].update(mtp_state_dict)
                 print(f"Successfully loaded {len(mtp_state_dict)} MTP tensors")
@@ -454,7 +460,7 @@ class GPTModelExporter:
         # Add multimodal components to state_dict. Since only support decoder model quantization,
         # no changes will be made to the multimodal components. We copy the multimodal components
         # from the pretrained model directly to the state_dict to avoid implementing the export logic.
-        if is_first_stage_main_rank:
+        if is_first_stage_main_rank and writes_layers:
             # layer_state_dicts is keyed by layer_number (1-indexed), so the first
             # decoder layer on this (first) PP stage is the smallest key, not 0.
             # Merge the multimodal components into that shard so they land in a file
@@ -482,11 +488,6 @@ class GPTModelExporter:
                 json.dump(config_dict, f, indent=4)
         torch.distributed.barrier()
 
-        # One writer per pipeline stage: other TP / DP / EP ranks hold the same layers (EP>1 ranks
-        # hold no gathered experts at all), and writing them too would race on the same files.
-        writes_layers = (
-            tp_rank == 0 and get_data_parallel_rank() == 0 and get_expert_model_parallel_rank() == 0
-        )
         save_safetensors_by_layer_index(
             layer_state_dicts=layer_state_dicts if writes_layers else {},
             total_layers=self.model.config.num_layers,
@@ -847,12 +848,12 @@ class GPTModelExporter:
                 self.rules["linear_fc1"](layer.mlp.linear_fc1, layer_id, is_mtp=is_mtp)
                 self.rules["linear_fc2"](layer.mlp.linear_fc2, layer_id, is_mtp=is_mtp)
 
-    def _get_mtp_state_dict(self) -> dict[str, torch.Tensor]:
-        """Export the live MTP module, or copy it from the pretrained model if absent."""
+    def _get_mtp_state_dict(self, copy_from_pretrained: bool = True) -> dict[str, torch.Tensor]:
+        """Export the live MTP module, or copy it from the pretrained model if absent (and allowed)."""
         model = getattr(self, "model", None)
         mtp = getattr(model, "mtp", None)
         if mtp is None or not hasattr(mtp, "layers") or len(mtp.layers) == 0:
-            return self._copy_mtp_state_dict_from_pretrained()
+            return self._copy_mtp_state_dict_from_pretrained() if copy_from_pretrained else {}
 
         # Inner layers reuse the base walker with is_mtp=True (retargets backbone -> mtp).
         saved_state_dict = self._state_dict
