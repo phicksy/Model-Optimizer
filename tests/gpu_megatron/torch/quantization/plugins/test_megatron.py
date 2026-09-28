@@ -60,12 +60,14 @@ from megatron.core.parallel_state import (
 )
 from megatron.core.tensor_parallel.layers import ColumnParallelLinear, RowParallelLinear
 from megatron.core.transformer import MegatronModule, TransformerConfig
+from megatron.core.transformer.mlp import MLP
 from megatron.core.transformer.moe.experts import SequentialMLP, TEGroupedMLP
 from megatron.core.transformer.moe.router import TopKRouter
 
 import modelopt
 import modelopt.torch.opt as mto
 import modelopt.torch.quantization as mtq
+from modelopt.torch.opt.dynamic import DynamicModule
 from modelopt.torch.opt.plugins.mcore_dist_checkpointing import (
     restore_sharded_modelopt_state,
     save_sharded_modelopt_state,
@@ -1811,6 +1813,30 @@ def test_kv_cache_quant(dist_workers_size_1, config):
     is only available with transformer_impl="modelopt" or "transformer_engine" (not "local").
     """
     dist_workers_size_1.run(partial(_test_kv_cache_quant_helper, config))
+
+
+def test_registered_megatron_quant_modules_checkpoint_quantizer_state():
+    """Quantizer state rides in ``_extra_state``, which torch saves only for classes overriding it.
+
+    ``register_modelopt_extra_state_callbacks`` binds the hooks per instance, so a registered class
+    without a class-level ``get/set_extra_state`` silently drops its amax from checkpoints (as
+    DSAttention did). Containers whose child linears hold all quantizers are exempt.
+    """
+    containers = {MLP, SequentialMLP, TEGroupedMLP}
+    base = torch.nn.Module
+    missing = []
+    for cls, quant_cls in QuantModuleRegistry._registry.items():
+        if not issubclass(cls, MegatronModule) or cls in containers:
+            continue
+        if issubclass(cls, DynamicModule):
+            continue  # e.g. LoRA wrappers: the runtime class also includes the wrapped Megatron layer
+        routes = all(
+            any(getattr(c, attr) is not getattr(base, attr) for c in (quant_cls, cls))
+            for attr in ("get_extra_state", "set_extra_state")
+        )
+        if not routes:
+            missing.append(cls.__name__)
+    assert not missing, f"quantizer state would be dropped from checkpoints for: {missing}"
 
 
 def _get_tiny_dsa_gpt_model():

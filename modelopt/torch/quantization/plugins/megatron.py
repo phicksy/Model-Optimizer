@@ -1045,7 +1045,8 @@ class _QuantCoreAttention(QuantModule):
         if value is None:
             # Absorbed MLA (DSAttention) passes value=None: the key is the KV latent that both K
             # and V are read from, so calibrate V on it too (output unused) to export a V scale.
-            self.v_bmm_quantizer(key)
+            if self.v_bmm_quantizer._if_calib:
+                self.v_bmm_quantizer(key)
         else:
             value = self.v_bmm_quantizer(value)
         key = self.k_bmm_quantizer(key)
@@ -1081,7 +1082,8 @@ if HAS_DSA:
 
         torch's state_dict() / load_state_dict() route ``_extra_state`` only through classes that
         override these; TEDotProductAttention does, DSAttention does not, so without them the
-        quantizer state (including amax) was dropped from checkpoints.
+        quantizer state (including amax) was dropped from checkpoints. They exist for that class
+        check: at runtime the instance-level modelopt callbacks shadow them, so don't remove them.
         """
 
         def get_extra_state(self):
