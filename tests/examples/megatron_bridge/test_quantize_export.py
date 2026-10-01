@@ -41,22 +41,35 @@ _DENSE_KWARGS = {
 
 
 @pytest.mark.parametrize(
-    ("create_model", "model_kwargs", "recipe", "export_parallelism"),
+    ("create_model", "model_kwargs", "recipe", "quantize_parallelism", "export_parallelism"),
     [
-        # MoE: routed experts used to be dropped silently from the export.
-        (create_tiny_qwen3_moe_dir, _DENSE_KWARGS, "general/ptq/nvfp4_default-kv_fp8", "pp_size"),
+        # MoE: routed experts used to be dropped silently from the export. Calibrates with context
+        # parallelism (not on the VLM: M-RoPE CP needs nemo:26.10).
+        (
+            create_tiny_qwen3_moe_dir,
+            _DENSE_KWARGS,
+            "general/ptq/nvfp4_default-kv_fp8",
+            "cp_size",
+            "pp_size",
+        ),
         # Dense VLM: only the language model is quantized, vision is copied through. Keeps the
         # FP8 script-to-checkpoint coverage.
-        (create_tiny_qwen3vl_dir, {}, "general/ptq/fp8_default-kv_fp8", "pp_size"),
+        (create_tiny_qwen3vl_dir, {}, "general/ptq/fp8_default-kv_fp8", "tp_size", "pp_size"),
         # Mamba hybrid + MoE with grouped-GEMM experts: exported with its experts sharded
         # across ranks (EP), resharded from the TP-quantized checkpoint.
-        (create_tiny_nemotron_h_dir, {}, "general/ptq/nvfp4_default-kv_fp8", "ep_size"),
+        (create_tiny_nemotron_h_dir, {}, "general/ptq/nvfp4_default-kv_fp8", "tp_size", "ep_size"),
     ],
     ids=["qwen3_moe", "qwen3vl", "nemotron_h"],
 )
 @pytest.mark.timeout(360)  # quantize + export in one test; 1-gpu CI exceeds the default 300s
 def test_quantize_and_export(
-    tmp_path: Path, num_gpus, create_model, model_kwargs, recipe, export_parallelism
+    tmp_path: Path,
+    num_gpus,
+    create_model,
+    model_kwargs,
+    recipe,
+    quantize_parallelism,
+    export_parallelism,
 ):
     """Quantize a tiny model via a YAML recipe and export it to a unified HF checkpoint."""
     hf_model_path = create_model(tmp_path, with_tokenizer=True, **model_kwargs)
@@ -68,7 +81,7 @@ def test_quantize_and_export(
         ["torchrun", f"--nproc_per_node={num_gpus}", "quantize.py", "--skip_generate"],
         hf_model_name_or_path=hf_model_path,
         recipe=recipe,
-        tp_size=num_gpus,
+        **{quantize_parallelism: num_gpus},
         calib_dataset_name="cnn_dailymail",
         calib_num_samples=4,
         calib_batch_size=2,
