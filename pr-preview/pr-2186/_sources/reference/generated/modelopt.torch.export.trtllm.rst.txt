@@ -13,6 +13,10 @@ trtllm
 
 
 
+   modelopt.torch.export.trtllm.decoder_type
+
+
+
    modelopt.torch.export.trtllm.distribute
 
 

@@ -2,7 +2,7 @@
 <html lang="en" data-accent-color="green" data-content_root="../../">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_aware_conversion - Model Optimizer 0.0.1.dev1+ge59932f62</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="quant_format" href="modelopt.torch.export.quant_format.html" /><link rel="prev" title="plugins" href="modelopt.torch.export.plugins.html" /><script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>quant_aware_conversion - Model Optimizer 0.0.1.dev1+g22d713241</title><link rel="index" title="Index" href="../../genindex.html" /><link rel="search" title="Search" href="../../search.html" /><link rel="next" title="quant_format" href="modelopt.torch.export.quant_format.html" /><link rel="prev" title="plugins" href="modelopt.torch.export.plugins.html" /><script>
     function setColorMode(t){let e=document.documentElement;e.setAttribute("data-color-mode",t);let a=window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches,s=t;"auto"===t&&(s=a?"dark":"light"),"light"===s?(e.classList.remove("dark"),e.classList.add("light")):(e.classList.remove("light"),e.classList.add("dark"))}
     setColorMode(localStorage._theme||"auto");
   </script><link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=e1a1ceaf" />
@@ -82,7 +82,7 @@ data-aria-dark="Switch to auto color mode">
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/onnx_ptq" rel="noopener noreferrer" target="_blank">Quick Start: PTQ - ONNX</a></li>
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/torch_onnx" rel="noopener noreferrer" target="_blank">Quick Start: PTQ - PyTorch to ONNX</a></li>
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/windows" rel="noopener noreferrer" target="_blank">Quick Start: PTQ - Windows</a></li>
-<li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/quantization_aware_training.html">Quick Start: QAT and QAD</a></li>
+<li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/quantization_aware_training_and_distillation.html">Quick Start: QAT and QAD</a></li>
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/pruning" rel="noopener noreferrer" target="_blank">Quick Start: Pruning</a></li>
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/llm_distill" rel="noopener noreferrer" target="_blank">Quick Start: Distillation</a></li>
 <li class="toctree-l1 _expand"><a class="reference external" href="https://github.com/NVIDIA/Model-Optimizer/tree/main/examples/speculative_decoding" rel="noopener noreferrer" target="_blank">Quick Start: Speculative Decoding</a></li>
@@ -102,7 +102,7 @@ data-aria-dark="Switch to auto color mode">
 <li class="toctree-l2"><a class="reference internal" href="../../guides/windows_guides/_ONNX_PTQ_guide.html">ONNX Quantization - Windows</a></li>
 </ul>
 </li>
-<li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/quantization_aware_training.html">Quantization-Aware Training and Distillation</a></li>
+<li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/quantization_aware_training_and_distillation.html">Quantization-Aware Training and Distillation</a></li>
 <li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/2_save_load.html">Saving &amp; Restoring</a></li>
 <li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/3_pruning.html">Pruning</a></li>
 <li class="toctree-l1 _expand"><a class="reference internal" href="../../guides/4_distillation.html">Distillation</a></li>
@@ -470,7 +470,7 @@ operations.</p>
 </section>
 <section id="scope">
 <h2>Scope<a class="headerlink" href="#scope" title="Link to this heading">#</a></h2>
-<p>Two reverse primitives cover the conversion_mapping cases:</p>
+<p>Three reverse primitives cover the conversion_mapping cases:</p>
 <ul class="simple">
 <li><p><strong>Rename</strong> — a key-level string substitution. Because a quantized linear stores
 every tensor under <code class="docutils literal notranslate"><span class="pre">&lt;module&gt;.&lt;leaf&gt;</span></code>, renaming the module substring rewrites the
@@ -479,6 +479,11 @@ weight and all its scale siblings together with no tensor manipulation.</p></li>
 <code class="docutils literal notranslate"><span class="pre">gate_proj</span></code> + <code class="docutils literal notranslate"><span class="pre">up_proj</span></code>). <code class="docutils literal notranslate"><span class="pre">weight</span></code>/<code class="docutils literal notranslate"><span class="pre">weight_scale</span></code>/<code class="docutils literal notranslate"><span class="pre">weight_scale_inv</span></code>/
 <code class="docutils literal notranslate"><span class="pre">bias</span></code> are chunked along the fused (output) dim; 0-d scalar <code class="docutils literal notranslate"><span class="pre">weight_scale_2</span></code>/
 <code class="docutils literal notranslate"><span class="pre">input_scale</span></code> are duplicated to each part (they are per-tensor and shared).</p></li>
+<li><p><strong>Merge</strong> — re-fuse tensors split by a conversion mapping (e.g. RADIO
+<code class="docutils literal notranslate"><span class="pre">attention.{q,k,v}_proj</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">attn.qkv</span></code>). Complete tensor groups are concatenated
+in source-pattern order and the conversion’s sub-model scope is preserved. Only
+unquantized merges are supported; any companion quantization scale triggers the
+safe fallback because concatenating scales alone cannot preserve quantization semantics.</p></li>
 </ul>
 <p>MoE experts need only <strong>Rename</strong>: ModelOpt’s export already expands the fused,
 stacked in-memory experts (<code class="docutils literal notranslate"><span class="pre">experts.gate_up_proj</span></code> of shape <code class="docutils literal notranslate"><span class="pre">[E,</span> <span class="pre">2F,</span> <span class="pre">H]</span></code>) into
@@ -507,10 +512,10 @@ leaves (e.g. <code class="docutils literal notranslate"><span class="pre">gate_p
 <table class="autosummary longtable docutils align-default">
 <tbody>
 <tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.apply_reverse_rules" title="modelopt.torch.export.quant_aware_conversion.apply_reverse_rules"><code class="xref py py-obj docutils literal notranslate"><span class="pre">apply_reverse_rules</span></code></a></p></td>
-<td><p>Apply quant-aware reverse conversion: splits first, then renames.</p></td>
+<td><p>Apply quant-aware reverse conversion: tensor transforms first, then renames.</p></td>
 </tr>
 <tr class="row-even"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper" title="modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper"><code class="xref py py-obj docutils literal notranslate"><span class="pre">build_reverse_name_mapper</span></code></a></p></td>
-<td><p>Build a <code class="docutils literal notranslate"><span class="pre">str</span> <span class="pre">-&gt;</span> <span class="pre">str</span></code> mapper that applies the quant-aware reverse <em>rename</em> rules.</p></td>
+<td><p>Build a <code class="docutils literal notranslate"><span class="pre">str</span> <span class="pre">-&gt;</span> <span class="pre">str</span></code> mapper for reverse renames and unquantized merges.</p></td>
 </tr>
 <tr class="row-odd"><td><p><a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.revert_quant_config_names" title="modelopt.torch.export.quant_aware_conversion.revert_quant_config_names"><code class="xref py py-obj docutils literal notranslate"><span class="pre">revert_quant_config_names</span></code></a></p></td>
 <td><p>Revert layer-reference keys to hub names, in place.</p></td>
@@ -625,16 +630,20 @@ are chunked. NVFP4 <code class="docutils literal notranslate"><span class="pre">
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.export.quant_aware_conversion.apply_reverse_rules">
-<span class="sig-name descname"><span class="pre">apply_reverse_rules</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">state_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">split_rules</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rename_rules</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.apply_reverse_rules" title="Link to this definition">#</a></dt>
-<dd><p>Apply quant-aware reverse conversion: splits first, then renames.</p>
-<p>Splits run on the in-memory (post-conversion) names; renames then map the
-resulting keys back to the original hub names. Renames are applied in order.</p>
+<span class="sig-name descname"><span class="pre">apply_reverse_rules</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">state_dict</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">split_rules</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">rename_rules</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">merge_rules</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.apply_reverse_rules" title="Link to this definition">#</a></dt>
+<dd><p>Apply quant-aware reverse conversion: tensor transforms first, then renames.</p>
+<p>Splits and merges run on the in-memory (post-conversion) names; renames then map
+the resulting keys back to the original hub names. Renames are applied in order.
+<code class="docutils literal notranslate"><span class="pre">merge_rules</span></code> is an internal hook for model-derived rules: unlike the public
+rename/split descriptors, each rule retains a live transformers converter for
+scoped matching. Call <a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.revert_weight_conversion_quant_aware" title="modelopt.torch.export.quant_aware_conversion.revert_weight_conversion_quant_aware"><code class="xref py py-func docutils literal notranslate"><span class="pre">revert_weight_conversion_quant_aware()</span></code></a> to derive them.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>state_dict</strong> (<em>dict</em><em>[</em><em>str</em><em>, </em><em>Tensor</em><em>]</em>)</p></li>
 <li><p><strong>split_rules</strong> (<em>list</em><em>[</em><a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.SplitRule" title="modelopt.torch.export.quant_aware_conversion.SplitRule"><em>SplitRule</em></a><em>]</em>)</p></li>
 <li><p><strong>rename_rules</strong> (<em>list</em><em>[</em><a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.RenameRule" title="modelopt.torch.export.quant_aware_conversion.RenameRule"><em>RenameRule</em></a><em>]</em>)</p></li>
+<li><p><strong>merge_rules</strong> (<em>list</em><em>[</em><em>_MergeRule</em><em>] </em><em>| </em><em>None</em>)</p></li>
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
@@ -645,8 +654,8 @@ resulting keys back to the original hub names. Renames are applied in order.</p>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper">
-<span class="sig-name descname"><span class="pre">build_reverse_name_mapper</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper" title="Link to this definition">#</a></dt>
-<dd><p>Build a <code class="docutils literal notranslate"><span class="pre">str</span> <span class="pre">-&gt;</span> <span class="pre">str</span></code> mapper that applies the quant-aware reverse <em>rename</em> rules.</p>
+<span class="sig-name descname"><span class="pre">build_reverse_name_mapper</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">model</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">tensor_keys</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper" title="Link to this definition">#</a></dt>
+<dd><p>Build a <code class="docutils literal notranslate"><span class="pre">str</span> <span class="pre">-&gt;</span> <span class="pre">str</span></code> mapper for reverse renames and unquantized merges.</p>
 <p>The exported weight tensors are reverted to the original hub names by
 <a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.revert_weight_conversion_quant_aware" title="modelopt.torch.export.quant_aware_conversion.revert_weight_conversion_quant_aware"><code class="xref py py-func docutils literal notranslate"><span class="pre">revert_weight_conversion_quant_aware()</span></code></a>, but the quantization config’s module
 references (<code class="docutils literal notranslate"><span class="pre">exclude_modules</span></code> and, for mixed precision, <code class="docutils literal notranslate"><span class="pre">quantized_layers</span></code> keys)
@@ -654,24 +663,37 @@ are built from the in-memory module names and would otherwise stay in the
 post-conversion namespace – so a deployment loader matching those patterns against
 the (reverted) hub-named modules finds no match, silently loads an excluded BF16
 layer as quantized, and fails. Applying the same rename rules to those name strings
-keeps them aligned with the weights. Only the rename rules apply (splits act on
-tensors, not names).</p>
+keeps them aligned with the weights. Merge-source names also map to the fused module
+so exact BF16 exclusions stay aligned. Quantized merges are rejected by the weight
+conversion; splits have no single target name and are not mapped here.</p>
+<p>Set <code class="docutils literal notranslate"><span class="pre">tensor_keys=True</span></code> for complete state-dict keys instead of module references.
+Per-tensor exporters must separately reject split and merge rules.</p>
 <p>Returns <code class="docutils literal notranslate"><span class="pre">None</span></code> when no renaming applies. Raises
 <a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.QuantConversionUnsupportedError" title="modelopt.torch.export.quant_aware_conversion.QuantConversionUnsupportedError"><code class="xref py py-class docutils literal notranslate"><span class="pre">QuantConversionUnsupportedError</span></code></a> when the mapping can’t be reversed, so the
 caller can keep the in-memory names for BOTH weights and config (mutually consistent).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>tensor_keys</strong> (<em>bool</em>)</p>
+</dd>
+</dl>
 </dd></dl>
 
 <dl class="py function">
 <dt class="sig sig-object py" id="modelopt.torch.export.quant_aware_conversion.revert_quant_config_names">
-<span class="sig-name descname"><span class="pre">revert_quant_config_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quantization</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mapper</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.revert_quant_config_names" title="Link to this definition">#</a></dt>
+<span class="sig-name descname"><span class="pre">revert_quant_config_names</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">quantization</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mapper</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">module_names</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#modelopt.torch.export.quant_aware_conversion.revert_quant_config_names" title="Link to this definition">#</a></dt>
 <dd><p>Revert layer-reference keys to hub names, in place.</p>
 <p><code class="docutils literal notranslate"><span class="pre">mapper</span></code> is the callable from <a class="reference internal" href="#modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper" title="modelopt.torch.export.quant_aware_conversion.build_reverse_name_mapper"><code class="xref py py-func docutils literal notranslate"><span class="pre">build_reverse_name_mapper()</span></code></a> (a no-op when
 <code class="docutils literal notranslate"><span class="pre">None</span></code>). Applies to the ModelOpt <code class="docutils literal notranslate"><span class="pre">{&quot;quantization&quot;:</span> <span class="pre">{...}}</span></code> sub-dict before it is
 written / format-converted, so both <code class="docutils literal notranslate"><span class="pre">hf_quant_config.json</span></code> and the embedded
 <code class="docutils literal notranslate"><span class="pre">config.json</span></code> <code class="docutils literal notranslate"><span class="pre">quantization_config</span></code> inherit the reverted names.</p>
+<p><code class="docutils literal notranslate"><span class="pre">module_names</span></code> supplies concrete pre-conversion names to expand exclusions whose
+wildcard coverage changes during conversion (e.g. <code class="docutils literal notranslate"><span class="pre">attention*</span></code> -&gt; <code class="docutils literal notranslate"><span class="pre">attn.qkv</span></code>).</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>quantization</strong> (<em>dict</em>)</p>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>quantization</strong> (<em>dict</em>)</p></li>
+<li><p><strong>module_names</strong> (<em>Iterable</em><em>[</em><em>str</em><em>]</em>)</p></li>
+</ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
 <dd class="field-even"><p><em>None</em></p>
